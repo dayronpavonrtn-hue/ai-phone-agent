@@ -1,7 +1,10 @@
 package com.aiphoneagent
 
+import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
 
 object TaskEngine {
     @Volatile
@@ -22,39 +25,48 @@ object TaskEngine {
         start()
         val trimmed = command.trim()
         val normalized = trimmed.lowercase()
-        if (normalized.isBlank()) return "Enter a command."
+        if (normalized.isBlank()) return "Escribe una orden."
 
         return when {
-            normalized == "open facebook" || normalized.contains("open facebook") -> {
+            normalized.contains("abrir facebook") || normalized.contains("open facebook") -> {
                 openPackage(context, "com.facebook.katana", "Facebook")
             }
-            normalized.contains("open sms") || normalized.contains("open messages") -> {
+            normalized.contains("abrir mensajes") || normalized.contains("abrir sms") ||
+                normalized.contains("open sms") || normalized.contains("open messages") -> {
                 openSms(context)
             }
-            isSmsCommand(normalized) -> {
-                executeSms(context, trimmed)
-            }
-            normalized.startsWith("click ") -> {
-                val text = trimmed.substringAfter("click ", "").trim()
+            isDirectSmsCommand(normalized) -> executeDirectSms(context, trimmed)
+            isNaturalSmsCommand(normalized) -> executeNaturalSms(context, trimmed)
+            normalized.startsWith("click ") || normalized.startsWith("toca ") || normalized.startsWith("pulsa ") -> {
+                val text = trimmed.substringAfter(" ").trim()
                 val clicked = AgentAccessibilityService.instance?.findTextAndClick(text) == true
-                if (clicked) "Clicked $text" else "Could not find $text on the active screen."
+                if (clicked) "Toqué $text" else "No pude encontrar $text en la pantalla."
             }
-            normalized == "stop" || normalized == "stop everything" -> {
+            normalized == "stop" || normalized == "stop everything" || normalized == "detente" || normalized == "parar" -> {
                 stop()
-                "Agent stopped."
+                "Agente detenido."
             }
             else -> {
                 ActionLog.add("Unsupported command: $command")
-                "Unsupported command. Try: Open Facebook, Open SMS, SMS to <number>: <message>, or Click <text>."
+                "No entendí la orden. Ejemplos: Abrir Facebook; SMS to 6155551234: hola; Mándale un mensaje a Juan diciendo que llego mañana."
             }
         }
     }
 
-    private fun isSmsCommand(normalized: String): Boolean {
+    private fun isDirectSmsCommand(normalized: String): Boolean {
         return normalized.startsWith("sms to ") || normalized.startsWith("send sms to ")
     }
 
-    private fun executeSms(context: Context, command: String): String {
+    private fun isNaturalSmsCommand(normalized: String): Boolean {
+        val starters = listOf(
+            "mandale un mensaje a ", "mándale un mensaje a ",
+            "manda un mensaje a ", "enviale un mensaje a ", "envíale un mensaje a ",
+            "escribele a ", "escríbele a "
+        )
+        return starters.any { normalized.startsWith(it) }
+    }
+
+    private fun executeDirectSms(context: Context, command: String): String {
         val payload = command
             .replace(Regex("^(?i)send\\s+sms\\s+to\\s+"), "")
             .replace(Regex("^(?i)sms\\s+to\\s+"), "")
@@ -62,27 +74,49 @@ object TaskEngine {
 
         val match = Regex("^([+0-9() .-]{7,25})\\s*[:,-]?\\s+(.+)$", RegexOption.DOT_MATCHES_ALL)
             .find(payload)
-            ?: return "Use: SMS to 6155551234: your message"
+            ?: return "Usa: SMS to 6155551234: tu mensaje"
 
-        val rawNumber = match.groupValues[1].trim()
+        return sendSms(context, match.groupValues[1].trim(), match.groupValues[2].trim())
+    }
+
+    private fun executeNaturalSms(context: Context, command: String): String {
+        val regex = Regex(
+            "^(?i)(?:m[aá]ndale un mensaje a|manda un mensaje a|env[ií]ale un mensaje a|escr[ií]bele a)\\s+(.+?)\\s+(?:diciendo(?:le)? que|que diga|y dile|dile que|:|,)?\\s*(.+)$",
+            RegexOption.DOT_MATCHES_ALL
+        )
+        val match = regex.find(command.trim())
+            ?: return "Prueba: Mándale un mensaje a Juan diciendo que llego mañana."
+
+        val recipient = match.groupValues[1].trim()
         val message = match.groupValues[2].trim()
-        val destination = normalizePhoneNumber(rawNumber)
+        if (message.isBlank()) return "Dime también qué mensaje quieres enviar."
 
-        if (destination.length < 7) {
-            return "The phone number does not look valid."
+        val number = if (recipient.any { it.isDigit() }) {
+            normalizePhoneNumber(recipient)
+        } else {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
+                return "Necesito permiso para leer tus contactos y encontrar a $recipient."
+            }
+            ContactResolver.findPhoneNumber(context, recipient)
+                ?: return "No encontré un contacto llamado $recipient."
         }
-        if (message.isBlank()) {
-            return "The SMS message cannot be empty."
-        }
+
+        return sendSms(context, number, message)
+    }
+
+    private fun sendSms(context: Context, rawNumber: String, message: String): String {
+        val destination = normalizePhoneNumber(rawNumber)
+        if (destination.length < 7) return "El número no parece válido."
+        if (message.isBlank()) return "El mensaje no puede estar vacío."
 
         val result = SmsSender.send(context, destination, message)
         return if (result.isSuccess) {
             ActionLog.add("SMS command completed for $destination")
-            "SMS sent to $destination."
+            "SMS enviado a $destination."
         } else {
-            val reason = result.exceptionOrNull()?.message ?: "Unknown SMS error"
+            val reason = result.exceptionOrNull()?.message ?: "Error desconocido"
             ActionLog.add("SMS command failed for $destination: $reason")
-            "SMS was not sent: $reason"
+            "No se envió el SMS: $reason"
         }
     }
 
@@ -94,13 +128,12 @@ object TaskEngine {
     }
 
     private fun openPackage(context: Context, packageName: String, label: String): String {
-        val manager = context.packageManager
-        val intent = manager.getLaunchIntentForPackage(packageName)
-            ?: return "$label is not installed or cannot be opened."
+        val intent = context.packageManager.getLaunchIntentForPackage(packageName)
+            ?: return "$label no está instalado o no se puede abrir."
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         context.startActivity(intent)
         ActionLog.add("Opened $label")
-        return "$label opened."
+        return "$label abierto."
     }
 
     private fun openSms(context: Context): String {
@@ -111,7 +144,7 @@ object TaskEngine {
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 context.startActivity(intent)
                 ActionLog.add("Opened SMS app")
-                return "SMS app opened."
+                return "Mensajes abierto."
             }
         }
         val intent = Intent(Intent.ACTION_MAIN).apply {
@@ -121,9 +154,9 @@ object TaskEngine {
         return try {
             context.startActivity(intent)
             ActionLog.add("Opened messaging application")
-            "Messaging app opened."
+            "Mensajes abierto."
         } catch (_: Exception) {
-            "No messaging application could be opened."
+            "No pude abrir una aplicación de mensajes."
         }
     }
 }
