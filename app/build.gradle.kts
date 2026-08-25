@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.ai.phoneagent"
+    namespace = "com.aiphoneagent"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.ai.phoneagent"
+        applicationId = "com.aiphoneagent"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
