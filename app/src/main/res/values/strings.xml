@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">AI Phone Agent</string>
+    <string name="accessibility_service_description">Allows AI Phone Agent to inspect and interact with visible app controls after the user enables the service.</string>
 </resources>
