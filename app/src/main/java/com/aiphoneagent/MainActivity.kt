@@ -13,7 +13,6 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import com.aiphoneagent.R
 
 class MainActivity : ComponentActivity() {
 
@@ -25,26 +24,36 @@ class MainActivity : ComponentActivity() {
         private const val SMS_PERMISSION_REQUEST = 1001
     }
 
+    private fun id(name: String): Int =
+        resources.getIdentifier(name, "id", packageName)
+
+    private fun layout(name: String): Int =
+        resources.getIdentifier(name, "layout", packageName)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
+        setContentView(layout("activity_main"))
 
-        statusText = findViewById(R.id.statusText)
-        logText = findViewById(R.id.logText)
-        commandInput = findViewById(R.id.commandInput)
+        statusText = findViewById(id("statusText"))
+        logText = findViewById(id("logText"))
+        commandInput = findViewById(id("commandInput"))
 
-        findViewById<Button>(R.id.accessibilityButton).setOnClickListener {
+        findViewById<Button>(id("accessibilityButton")).setOnClickListener {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
 
-        findViewById<Button>(R.id.runButton).setOnClickListener {
+        findViewById<Button>(id("runButton")).setOnClickListener {
             val command = commandInput.text.toString()
+            if (command.isBlank()) {
+                Toast.makeText(this, "Enter a command first", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
             val result = TaskEngine.execute(this, command)
             Toast.makeText(this, result, Toast.LENGTH_SHORT).show()
             refresh()
         }
 
-        findViewById<Button>(R.id.stopButton).setOnClickListener {
+        findViewById<Button>(id("stopButton")).setOnClickListener {
             TaskEngine.stop()
             refresh()
         }
@@ -55,7 +64,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        refresh()
+        if (::statusText.isInitialized) refresh()
     }
 
     private fun requestSmsPermissionsIfNeeded() {
@@ -68,7 +77,11 @@ class MainActivity : ComponentActivity() {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
         if (missing.isNotEmpty()) {
-            ActivityCompat.requestPermissions(this, missing.toTypedArray(), SMS_PERMISSION_REQUEST)
+            ActivityCompat.requestPermissions(
+                this,
+                missing.toTypedArray(),
+                SMS_PERMISSION_REQUEST
+            )
         }
     }
 
