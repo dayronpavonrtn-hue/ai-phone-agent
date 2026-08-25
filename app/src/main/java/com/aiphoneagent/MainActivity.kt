@@ -21,7 +21,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var commandInput: EditText
 
     companion object {
-        private const val SMS_PERMISSION_REQUEST = 1001
+        private const val PERMISSION_REQUEST = 1001
     }
 
     private fun id(name: String): Int =
@@ -45,11 +45,11 @@ class MainActivity : ComponentActivity() {
         findViewById<Button>(id("runButton")).setOnClickListener {
             val command = commandInput.text.toString()
             if (command.isBlank()) {
-                Toast.makeText(this, "Enter a command first", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Escribe una orden primero", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
             val result = TaskEngine.execute(this, command)
-            Toast.makeText(this, result, Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, result, Toast.LENGTH_LONG).show()
             refresh()
         }
 
@@ -58,7 +58,7 @@ class MainActivity : ComponentActivity() {
             refresh()
         }
 
-        requestSmsPermissionsIfNeeded()
+        requestPermissionsIfNeeded()
         refresh()
     }
 
@@ -67,21 +67,18 @@ class MainActivity : ComponentActivity() {
         if (::statusText.isInitialized) refresh()
     }
 
-    private fun requestSmsPermissionsIfNeeded() {
+    private fun requestPermissionsIfNeeded() {
         val permissions = arrayOf(
             Manifest.permission.SEND_SMS,
             Manifest.permission.READ_SMS,
-            Manifest.permission.RECEIVE_SMS
+            Manifest.permission.RECEIVE_SMS,
+            Manifest.permission.READ_CONTACTS
         )
         val missing = permissions.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
         if (missing.isNotEmpty()) {
-            ActivityCompat.requestPermissions(
-                this,
-                missing.toTypedArray(),
-                SMS_PERMISSION_REQUEST
-            )
+            ActivityCompat.requestPermissions(this, missing.toTypedArray(), PERMISSION_REQUEST)
         }
     }
 
