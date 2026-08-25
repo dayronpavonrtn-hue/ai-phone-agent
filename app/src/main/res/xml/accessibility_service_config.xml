@@ -6,4 +6,4 @@
     android:description="@string/accessibility_service_description"
     android:notificationTimeout="100"
     android:canPerformGestures="true"
-    android:settingsActivity="com.ai.phoneagent.MainActivity" />
+    android:settingsActivity="com.aiphoneagent.MainActivity" />
