@@ -55,6 +55,51 @@
             android:text="STOP EVERYTHING" />
 
         <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="28dp"
+            android:text="LottoMind Alerts"
+            android:textSize="22sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/lottoStatusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="Alerts: OFF"
+            android:textSize="15sp" />
+
+        <EditText
+            android:id="@+id/lottoUrlInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:hint="http://PC-IP:3000"
+            android:inputType="textUri" />
+
+        <Button
+            android:id="@+id/lottoStartButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Start LottoMind alerts" />
+
+        <Button
+            android:id="@+id/lottoRefreshButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Check LottoMind now" />
+
+        <Button
+            android:id="@+id/lottoStopButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Stop LottoMind alerts" />
+
+        <TextView
             android:id="@+id/logText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
