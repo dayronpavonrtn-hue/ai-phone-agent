@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException, Request
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("nexora-payment-listener")
 
-app = FastAPI(title="Nexora Payment Listener", version="1.0.0")
+app = FastAPI(title="Nexora Payment Listener", version="1.1.0")
 
 PAYPAL_BASE_URL = os.getenv("PAYPAL_BASE_URL", "https://api-m.paypal.com")
 PAYPAL_CLIENT_ID = os.getenv("PAYPAL_CLIENT_ID", "")
@@ -23,9 +23,22 @@ processed_event_ids: set[str] = set()
 recent_confirmed: list[Dict[str, Any]] = []
 
 
+@app.on_event("startup")
+async def startup_log() -> None:
+    logger.info(
+        "CONFIG paypal_client_id=%s paypal_client_secret=%s paypal_webhook_id=%s paypal_base=%s expected=%s_%s",
+        bool(PAYPAL_CLIENT_ID),
+        bool(PAYPAL_CLIENT_SECRET),
+        bool(PAYPAL_WEBHOOK_ID),
+        PAYPAL_BASE_URL,
+        EXPECTED_AMOUNT,
+        EXPECTED_CURRENCY,
+    )
+
+
 @app.get("/")
 def root() -> Dict[str, str]:
-    return {"service": "Nexora Payment Listener", "status": "online"}
+    return {"service": "Nexora Payment Listener", "status": "online", "version": "1.1.0"}
 
 
 @app.get("/health")
@@ -33,6 +46,7 @@ def health() -> Dict[str, Any]:
     return {
         "ok": True,
         "paypal_configured": bool(PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET and PAYPAL_WEBHOOK_ID),
+        "paypal_environment": "sandbox" if "sandbox" in PAYPAL_BASE_URL else "live",
         "expected_amount": str(EXPECTED_AMOUNT),
         "expected_currency": EXPECTED_CURRENCY,
     }
@@ -45,14 +59,21 @@ def payments_recent() -> Dict[str, Any]:
 
 async def paypal_access_token() -> str:
     if not PAYPAL_CLIENT_ID or not PAYPAL_CLIENT_SECRET:
+        logger.error(
+            "PAYPAL_CONFIG_ERROR client_id=%s client_secret=%s",
+            bool(PAYPAL_CLIENT_ID),
+            bool(PAYPAL_CLIENT_SECRET),
+        )
         raise HTTPException(status_code=503, detail="PayPal API credentials not configured")
+
     async with httpx.AsyncClient(timeout=20) as client:
         response = await client.post(
             f"{PAYPAL_BASE_URL}/v1/oauth2/token",
             data={"grant_type": "client_credentials"},
             auth=(PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET),
-            headers={"Accept": "application/json"},
+            headers={"Accept": "application/json", "Accept-Language": "en_US"},
         )
+
     if response.status_code >= 400:
         logger.error("PAYPAL_TOKEN_ERROR status=%s body=%s", response.status_code, response.text[:500])
         raise HTTPException(status_code=502, detail="Unable to authenticate with PayPal")
@@ -61,6 +82,7 @@ async def paypal_access_token() -> str:
 
 async def verify_paypal_webhook(request: Request, event: Dict[str, Any]) -> bool:
     if not PAYPAL_WEBHOOK_ID:
+        logger.error("PAYPAL_CONFIG_ERROR webhook_id_missing=true")
         raise HTTPException(status_code=503, detail="PAYPAL_WEBHOOK_ID not configured")
 
     headers = request.headers
@@ -72,6 +94,7 @@ async def verify_paypal_webhook(request: Request, event: Dict[str, Any]) -> bool
         "transmission_time": headers.get("paypal-transmission-time"),
     }
     if not all(required.values()):
+        logger.warning("PAYPAL_VERIFY_MISSING_HEADERS present=%s", {k: bool(v) for k, v in required.items()})
         return False
 
     token = await paypal_access_token()
@@ -86,10 +109,14 @@ async def verify_paypal_webhook(request: Request, event: Dict[str, Any]) -> bool
             json=payload,
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
         )
+
     if response.status_code >= 400:
         logger.error("PAYPAL_VERIFY_ERROR status=%s body=%s", response.status_code, response.text[:500])
         return False
-    return response.json().get("verification_status") == "SUCCESS"
+
+    verification_status = response.json().get("verification_status")
+    logger.info("PAYPAL_VERIFY_RESULT status=%s", verification_status)
+    return verification_status == "SUCCESS"
 
 
 def extract_capture(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -97,10 +124,7 @@ def extract_capture(event: Dict[str, Any]) -> Dict[str, Any]:
     amount_obj = resource.get("amount") or {}
     payer = resource.get("payer") or {}
     payer_email = payer.get("email_address")
-    if not payer_email:
-        supplementary = resource.get("supplementary_data") or {}
-        related = supplementary.get("related_ids") or {}
-        payer_email = related.get("payer_id")
+
     return {
         "capture_id": resource.get("id"),
         "status": resource.get("status"),
@@ -123,6 +147,14 @@ async def paypal_webhook(request: Request) -> Dict[str, Any]:
     event_id = str(event.get("id") or "")
     event_type = str(event.get("event_type") or "")
     logger.info("PAYPAL_EVENT_RECEIVED id=%s type=%s", event_id, event_type)
+
+    # PayPal's Webhooks Simulator sends mock events that PayPal explicitly says
+    # cannot be signature-verified. We still receive/log them, but never treat
+    # them as real payments. Real production events must pass signature verification.
+    is_simulator = event_id.startswith("WH-") and "simulator" in (request.headers.get("user-agent") or "").lower()
+    if is_simulator:
+        logger.info("PAYPAL_SIMULATOR_EVENT_RECEIVED id=%s type=%s", event_id, event_type)
+        return {"ok": True, "simulator": True, "verified_payment": False, "event_type": event_type}
 
     verified = await verify_paypal_webhook(request, event)
     if not verified:
@@ -173,4 +205,4 @@ async def paypal_webhook(request: Request) -> Dict[str, Any]:
     if event_id:
         processed_event_ids.add(event_id)
 
-    return {"ok": True, "event_type": event_type}
+    return {"ok": True, "verified": True, "event_type": event_type}
