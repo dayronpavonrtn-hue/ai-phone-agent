@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException, Request
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("nexora-payment-listener")
 
-app = FastAPI(title="Nexora Payment Listener", version="1.1.0")
+app = FastAPI(title="Nexora Payment Listener", version="1.2.0")
 
 PAYPAL_BASE_URL = os.getenv("PAYPAL_BASE_URL", "https://api-m.paypal.com")
 PAYPAL_CLIENT_ID = os.getenv("PAYPAL_CLIENT_ID", "")
@@ -38,7 +38,7 @@ async def startup_log() -> None:
 
 @app.get("/")
 def root() -> Dict[str, str]:
-    return {"service": "Nexora Payment Listener", "status": "online", "version": "1.1.0"}
+    return {"service": "Nexora Payment Listener", "status": "online", "version": "1.2.0"}
 
 
 @app.get("/health")
@@ -55,6 +55,23 @@ def health() -> Dict[str, Any]:
 @app.get("/payments/recent")
 def payments_recent() -> Dict[str, Any]:
     return {"confirmed": recent_confirmed[-20:]}
+
+
+@app.post("/paypal/simulator")
+async def paypal_simulator(request: Request) -> Dict[str, Any]:
+    """Connectivity-only endpoint for PayPal's mock Webhooks Simulator.
+
+    Simulator events are never treated as real payments because PayPal states
+    they cannot be signature-verified. Production must use /paypal/webhook.
+    """
+    try:
+        event = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+    event_id = str(event.get("id") or "")
+    event_type = str(event.get("event_type") or "")
+    logger.info("PAYPAL_SIMULATOR_EVENT_RECEIVED id=%s type=%s", event_id, event_type)
+    return {"ok": True, "simulator": True, "verified_payment": False, "event_type": event_type}
 
 
 async def paypal_access_token() -> str:
@@ -123,14 +140,12 @@ def extract_capture(event: Dict[str, Any]) -> Dict[str, Any]:
     resource = event.get("resource") or {}
     amount_obj = resource.get("amount") or {}
     payer = resource.get("payer") or {}
-    payer_email = payer.get("email_address")
-
     return {
         "capture_id": resource.get("id"),
         "status": resource.get("status"),
         "amount": amount_obj.get("value"),
         "currency": (amount_obj.get("currency_code") or "").upper(),
-        "payer_email": payer_email,
+        "payer_email": payer.get("email_address"),
         "custom_id": resource.get("custom_id"),
         "invoice_id": resource.get("invoice_id"),
     }
@@ -147,14 +162,6 @@ async def paypal_webhook(request: Request) -> Dict[str, Any]:
     event_id = str(event.get("id") or "")
     event_type = str(event.get("event_type") or "")
     logger.info("PAYPAL_EVENT_RECEIVED id=%s type=%s", event_id, event_type)
-
-    # PayPal's Webhooks Simulator sends mock events that PayPal explicitly says
-    # cannot be signature-verified. We still receive/log them, but never treat
-    # them as real payments. Real production events must pass signature verification.
-    is_simulator = event_id.startswith("WH-") and "simulator" in (request.headers.get("user-agent") or "").lower()
-    if is_simulator:
-        logger.info("PAYPAL_SIMULATOR_EVENT_RECEIVED id=%s type=%s", event_id, event_type)
-        return {"ok": True, "simulator": True, "verified_payment": False, "event_type": event_type}
 
     verified = await verify_paypal_webhook(request, event)
     if not verified:
